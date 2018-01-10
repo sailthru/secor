@@ -2,15 +2,10 @@ package com.pinterest.secor.util;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protobuf.util.JsonFormat;
-import org.apache.commons.io.Charsets;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,15 +29,11 @@ import com.pinterest.secor.common.SecorConfig;
 public class ProtobufUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(ProtobufUtil.class);
-    private static String JSON = "json";
-//    private static String PROTOBUF = "protobuf";
 
     private boolean allTopics;
     private Map<String, Class<? extends Message>> messageClassByTopic = new HashMap<String, Class<? extends Message>>();
-    private Map<String, String> messageFormatByTopic;
     private Map<String, Method> messageParseMethodByTopic = new HashMap<String, Method>();
     private Class<? extends Message> messageClassForAll;
-    private String messageFormatForAll;
     private Method messageParseMethodForAll;
 
     /**
@@ -57,22 +48,6 @@ public class ProtobufUtil {
     @SuppressWarnings("unchecked")
     public ProtobufUtil(SecorConfig config) {
         Map<String, String> messageClassPerTopic = config.getProtobufMessageClassPerTopic();
-
-        messageFormatByTopic = config.getMessageFormatPerTopic();
-        for (Entry<String, String> entry : messageClassPerTopic.entrySet()) {
-            String topic = entry.getKey();
-            String format = entry.getValue();
-            allTopics = "*".equals(topic);
-            if(allTopics) {
-                messageFormatForAll = format;
-                LOG.info("Assuming the format: {} for all Kafka topics", format);
-                break;
-            } else {
-                messageFormatByTopic.putIfAbsent(topic, format);
-                LOG.info("Assuming the format: {} for Kafka topic {}", format, topic);
-            }
-        }
-
         for (Entry<String, String> entry : messageClassPerTopic.entrySet()) {
             try {
                 String topic = entry.getKey();
@@ -81,7 +56,6 @@ public class ProtobufUtil {
                         new Class<?>[] { byte[].class });
 
                 allTopics = "*".equals(topic);
-
 
                 if (allTopics) {
                     messageClassForAll = messageClass;
@@ -123,30 +97,6 @@ public class ProtobufUtil {
     }
 
     /**
-     * Converts JSON message into a protobuf message
-     *
-     * @param topic
-     *            Kafka topic name
-     * @param payload
-     *            Byte array containing encoded json message
-     * @return protobuf message instance
-     * @throws RuntimeException
-     *             when there's problem decoding protobuf message
-     */
-    public Message decodeJsonMessage(String topic, byte[] payload){
-        try {
-            Method builderGetter = allTopics ? messageClassForAll.getDeclaredMethod("newBuilder") : messageClassByTopic.get(topic).getDeclaredMethod("newBuilder");
-            com.google.protobuf.GeneratedMessageV3.Builder builder = (com.google.protobuf.GeneratedMessageV3.Builder) builderGetter.invoke(null);
-            JsonFormat.parser().ignoringUnknownFields().merge(new String(payload, Charsets.UTF_8), builder);
-            return builder.build();
-        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException("Error parsing protobuf message", e);
-        } catch (InvalidProtocolBufferException e) {
-            throw new RuntimeException("Error parsing protobuf message", e);
-        }
-    }
-
-    /**
      * Decodes protobuf message
      * 
      * @param topic
@@ -159,9 +109,6 @@ public class ProtobufUtil {
      */
     public Message decodeMessage(String topic, byte[] payload) {
         try {
-            if (shouldDecodeFromJsonMessage(topic)) {
-                return decodeJsonMessage(topic, payload);
-            }
             Method parseMethod = allTopics ? messageParseMethodForAll : messageParseMethodByTopic.get(topic);
             return (Message) parseMethod.invoke(null, payload);
         } catch (IllegalArgumentException e) {
@@ -173,14 +120,5 @@ public class ProtobufUtil {
         } catch (InvocationTargetException e) {
             throw new RuntimeException("Error parsing protobuf message", e);
         }
-    }
-
-    private boolean shouldDecodeFromJsonMessage(String topic){
-        if (StringUtils.isNotEmpty(messageFormatForAll) && StringUtils.equalsIgnoreCase(messageFormatForAll, JSON)) {
-            return true;
-        } else if (StringUtils.equalsIgnoreCase(messageFormatByTopic.getOrDefault(topic, ""), JSON)) {
-            return true;
-        }
-        return false;
     }
 }
